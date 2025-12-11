@@ -1,101 +1,113 @@
 ; =================================================================
-; FINAL PROJECT: SCROLLING "12345"
-; Configuration: (Based on your successful test88 result)
-;   - PORT A (0FFE0H) -> Segments AA..AG
-;   - PORT B (0FFE2H) -> CAT / Select Pin (Pin PB0)
-;   - VCC / GND       -> Connected to Trainer Power
+; Project: Scrolling Student ID "222438835"
+; Hardware: 
+;   - Port A (0FFE0H) -> Segments
+;   - Port B (0FFE2H) -> CAT / Select (Pin PB0)
+;   - VCC/GND -> Connected to Trainer Power
 ; =================================================================
 
 ORG 2000H
     JMP START
 
-; --- DATA TABLE (Common Cathode) ---
-; 0=3FH, 1=06H, 2=5BH, 3=4FH, 4=66H, 5=6DH, Blank=00H
-CODES:  
-    DB 00H      ; [0] Blank
-    DB 06H      ; [1] Number 1
-    DB 5BH      ; [2] Number 2
-    DB 4FH      ; [3] Number 3
-    DB 66H      ; [4] Number 4
-    DB 6DH      ; [5] Number 5
-    DB 00H      ; [6] Blank
+; --- DATA TABLE ---
+; Digits: 2, 2, 2, 4, 3, 8, 8, 3, 5
+; Hex Codes: 
+; 2 = 5BH
+; 4 = 66H
+; 3 = 4FH
+; 8 = 7FH
+; 5 = 6DH
+; Space = 00H
+
+CODES:
+    DB 5BH      ; [0] '2'
+    DB 5BH      ; [1] '2'
+    DB 5BH      ; [2] '2'
+    DB 66H      ; [3] '4'
+    DB 4FH      ; [4] '3'
+    DB 7FH      ; [5] '8'
+    DB 7FH      ; [6] '8'
+    DB 4FH      ; [7] '3'
+    DB 6DH      ; [8] '5'
+    DB 00H      ; [9] Space (End)
 
 START:
-    ; 1. Initialize Ports
-    MOV DX, 0FFE6H  ; Control Register
-    MOV AL, 80H     ; All Ports Output
+    ; 1. Initialize 8255 PPI (All Outputs)
+    MOV DX, 0FFE6H
+    MOV AL, 80H
     OUT DX, AL
 
 MAIN_LOOP:
-    MOV SI, CODES   ; Start of data table
-    MOV CX, 6       ; Number of shifts
+    MOV SI, CODES   ; Point to start of ID
+    MOV CX, 9       ; Sequence Length (9 scrolling steps)
 
 SCROLL_SEQUENCE:
-    PUSH CX         ; Save loop counter
+    PUSH CX         ; Save counter
 
-    ; Load the two digits to display
-    MOV AL, BYTE [SI]    ; Left Digit Data
-    MOV BL, BYTE [SI+1]  ; Right Digit Data
-    
-    ; Multiplex Speed (Hold this frame for a moment)
-    MOV CX, 00FFH
+    ; Load pair of numbers to display
+    MOV AL, BYTE [SI]    ; Left Digit
+    MOV BL, BYTE [SI+1]  ; Right Digit
 
-MULTIPLEX_FRAME:
-    CALL DISPLAY_DIGITS
-    LOOP MULTIPLEX_FRAME
+    ; --- SCROLL SPEED DELAY ---
+    ; Increased to 01FFH to make it slower and readable
+    MOV CX, 01FFH   
 
-    POP CX          ; Restore loop counter
-    INC SI          ; Move to next number pair
+MULTIPLEX_LOOP:
+    CALL DISPLAY_PAIR
+    LOOP MULTIPLEX_LOOP
+
+    POP CX          ; Restore counter
+    INC SI          ; Move to next number
     LOOP SCROLL_SEQUENCE
 
-    JMP MAIN_LOOP   ; Restart sequence
+    JMP MAIN_LOOP   ; Repeat forever
 
 ; --- SUBROUTINE: MULTIPLEXING ---
-DISPLAY_DIGITS:
+DISPLAY_PAIR:
     PUSH AX
     PUSH DX
 
-    ; -------------------------------------------------
-    ; STEP 1: SHOW LEFT DIGIT (CAT = LOW)
-    ; -------------------------------------------------
-    ; A. Select Left Digit (PB0 = 0)
-    MOV DX, 0FFE2H  ; Port B
-    MOV AH, 00H     ; Signal Low
-    MOV AL, AH      
-    OUT DX, AL      
-
-    ; B. Send Segment Data to Port A
-    MOV DX, 0FFE0H  ; Port A
-    POP AX          ; Restore AL (Left Data) from stack
-    PUSH AX         ; Put it back for safe keeping
-    OUT DX, AL      
-    
-    CALL DELAY_SMALL
-
-    ; -------------------------------------------------
-    ; STEP 2: SHOW RIGHT DIGIT (CAT = HIGH)
-    ; -------------------------------------------------
-    ; A. Select Right Digit (PB0 = 1)
-    MOV DX, 0FFE2H  ; Port B
-    MOV AH, 01H     ; Signal High
+    ; --------------------------------------
+    ; 1. DISPLAY RIGHT DIGIT (CAT = HIGH)
+    ; --------------------------------------
+    ; Select Right Digit (PB0 = 1)
+    MOV DX, 0FFE2H   ; Port B Address
+    MOV AH, 01H      ; Signal High
     MOV AL, AH
-    OUT DX, AL      
+    OUT DX, AL
 
-    ; B. Send Segment Data to Port A
-    MOV DX, 0FFE0H  ; Port A
-    MOV AL, BL      ; Move Right Data (BL) to AL
-    OUT DX, AL      
+    ; Send Segment Data (Right Digit)
+    MOV DX, 0FFE0H   ; Port A Address
+    MOV AL, BL       ; Get Right Digit Data (BL)
+    OUT DX, AL       
     
-    CALL DELAY_SMALL
+    CALL DELAY_MUX   ; Wait for eye to see it
+
+    ; --------------------------------------
+    ; 2. DISPLAY LEFT DIGIT (CAT = LOW)
+    ; --------------------------------------
+    ; Select Left Digit (PB0 = 0)
+    MOV DX, 0FFE2H   ; Port B Address
+    MOV AL, 00H      ; Signal Low
+    OUT DX, AL
+
+    ; Send Segment Data (Left Digit)
+    MOV DX, 0FFE0H   ; Port A Address
+    POP AX           ; Restore original AX to get AL
+    PUSH AX          ; Put it back 
+    OUT DX, AL       ; Send Left Digit Data (AL)
+    
+    CALL DELAY_MUX   ; Wait for eye to see it
 
     POP DX
     POP AX
     RET
 
-; --- DELAY ---
-DELAY_SMALL:
+; --- DELAY FOR MULTIPLEXING ---
+DELAY_MUX:
     PUSH CX
-    MOV CX, 0080H   ; Adjust this for brightness/flicker
+    ; Increased delay here helps fix "Only one display working"
+    MOV CX, 0200H    
 WAIT:
     LOOP WAIT
     POP CX
