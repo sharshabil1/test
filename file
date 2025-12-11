@@ -3,101 +3,98 @@
 ; Hardware: 8086 Trainer with 8255 PPI
 ; Connection: 
 ;   - Port A (0FFE0H) -> Segments (AA-AG)
-;   - Port C (0FFE4H) -> Digit Select (CAT Pin)
-; 
-; Description: Scrolls numbers 12345 across the two digits.
-; Sequence: [ ,1] -> [1,2] -> [2,3] -> [3,4] -> [4,5] -> [5, ]
+;   - Port C (0FFE4H) -> Digit Select (CAT Pin connected to PC0)
 ; =============================================================
 
 ORG 2000H           ; Executable starts at memory location 2000H
     JMP START
 
 ; --- DATA TABLE ---
-; 7-Segment Codes (Common Cathode assumed for PmodSSD)
-; Format: g f e d c b a (Bit 6 to Bit 0)
+; 7-Segment Codes (Common Cathode)
 ; 0=3FH, 1=06H, 2=5BH, 3=4FH, 4=66H, 5=6DH, Blank=00H
-CODES:  DB 00H      ; Index 0: Blank (Space)
-        DB 06H      ; Index 1: Display '1'
-        DB 5BH      ; Index 2: Display '2'
-        DB 4FH      ; Index 3: Display '3'
-        DB 66H      ; Index 4: Display '4'
-        DB 6DH      ; Index 5: Display '5'
-        DB 00H      ; Index 6: Blank (Space for end of scroll)
+CODES:  DB 00H      ; Index 0: Blank 
+        DB 06H      ; Index 1: '1'
+        DB 5BH      ; Index 2: '2'
+        DB 4FH      ; Index 3: '3'
+        DB 66H      ; Index 4: '4'
+        DB 6DH      ; Index 5: '5'
+        DB 00H      ; Index 6: Blank 
 
 ; --- MAIN PROGRAM ---
 START:
     ; 1. Initialize 8255 PPI
-    MOV DX, 0FFE6H  ; Control Word Register Address
-    MOV AL, 80H     ; Control Word: Port A=Out, Port B=Out, Port C=Out
+    MOV DX, 0FFE6H  ; Control Word Register
+    MOV AL, 80H     ; Port A=Out, Port B=Out, Port C=Out
     OUT DX, AL
 
 MAIN_LOOP:
-    LEA SI, CODES   ; Load address of our table into SI
-    MOV CX, 6       ; We have 6 transitions to show for sequence "12345"
-                    ; Pair 1: (Blank, 1)
-                    ; Pair 2: (1, 2)
-                    ; ...etc
+    ; Fix for Line 35 Error: Use MOV immediate for address, not LEA
+    MOV SI, CODES   ; Point SI to the start of the CODES table [cite: 47]
+    MOV CX, 6       ; Loop counter for the scrolling sequence
 
 SCROLL_SEQ:
-    PUSH CX         ; Save outer loop counter
+    PUSH CX         ; Save loop counter
 
-    ; Fetch the two digits to display
-    MOV AL, [SI]    ; Load "Left Digit" value from table
-    MOV BL, [SI+1]  ; Load "Right Digit" value from next spot in table
+    ; Fetch the two digits
+    ; Fix for "Invalid Operand": Explicitly tell NASM these are BYTES
+    MOV AL, BYTE [SI]    ; Load Left Digit code
+    MOV BL, BYTE [SI+1]  ; Load Right Digit code
     
-    ; We need to hold this display for a while so the human eye sees it
-    ; This loop performs the Multiplexing (switching fast between digits)
-    MOV CX, 50      ; Loop count determines "Speed" of scroll (50 = approx 0.5 sec)
+    ; Display Loop (Multiplexing)
+    MOV CX, 50      ; Speed of scroll (Higher = Slower)
 
 DISPLAY_FRAME:
-    CALL MULTIPLEX  ; Show the pair (AL and BL) once
+    CALL MULTIPLEX
     LOOP DISPLAY_FRAME
 
-    POP CX          ; Restore outer loop counter
-    INC SI          ; Move to next number in the sequence (Scroll effect)
-    LOOP SCROLL_SEQ ; Go to next step in scroll
+    POP CX          ; Restore loop counter
+    INC SI          ; Move to next number in the table
+    LOOP SCROLL_SEQ 
 
-    JMP MAIN_LOOP   ; Reset and start from beginning
+    JMP MAIN_LOOP   ; Repeat forever
 
 ; --- SUBROUTINE: MULTIPLEX ---
-; Inputs: AL contains Left Digit Code, BL contains Right Digit Code
-; Logic: Turns on Left -> Delay -> Turns on Right -> Delay
+; Rapidly switches between Left (AL) and Right (BL) digits
 MULTIPLEX:
-    PUSH AX         ; Save registers
+    PUSH AX
     PUSH DX
 
-    ; -- DISPLAY LEFT DIGIT --
-    MOV DX, 0FFE4H  ; Port C Address (Control/Digit Select)
-    MOV AH, 00H     ; Signal Low (or High depending on PmodSSD)
-    OUT DX, AL      ; Send select signal (Assume Low = Left)
-    
-    MOV DX, 0FFE0H  ; Port A Address (Segments)
-    OUT DX, AL      ; Send Segment Code (Left Digit)
-    
-    CALL DELAY_SMALL ; Small delay for brightness
-
-    ; -- DISPLAY RIGHT DIGIT --
+    ; 1. DISPLAY LEFT DIGIT
+    ; Select Left Digit (PC0 = 0)
     MOV DX, 0FFE4H  ; Port C Address
-    MOV AH, 01H     ; Toggle Select Signal (Assume High = Right)
-    MOV AL, AH
-    OUT DX, AL      ; Send select signal
+    MOV AL, 00H     ; Bit 0 Low
+    OUT DX, AL      
     
+    ; Send Data to Segments
     MOV DX, 0FFE0H  ; Port A Address
-    MOV AL, BL      ; Move Right Digit Code to AL
-    OUT DX, AL      ; Send Segment Code (Right Digit)
+    POP AX          ; Retrieve original AX (with AL/BL data)
+    PUSH AX         ; Put it back on stack
+    OUT DX, AL      ; Send Left Digit Code
     
-    CALL DELAY_SMALL ; Small delay for brightness
+    CALL DELAY_SMALL
+
+    ; 2. DISPLAY RIGHT DIGIT
+    ; Select Right Digit (PC0 = 1)
+    MOV DX, 0FFE4H  ; Port C Address
+    MOV AL, 01H     ; Bit 0 High
+    OUT DX, AL      
+    
+    ; Send Data to Segments
+    MOV DX, 0FFE0H  ; Port A Address
+    MOV AL, BL      ; Move Right Digit Code (BL) to AL
+    OUT DX, AL      ; Send Right Digit Code
+    
+    CALL DELAY_SMALL
 
     POP DX
     POP AX
     RET
 
 ; --- SUBROUTINE: DELAY ---
-; Very short delay just to let the LED light up before switching
 DELAY_SMALL:
     PUSH CX
-    MOV CX, 0100H   ; Adjust this value if flickering occurs
-WAIT:
-    LOOP WAIT
+    MOV CX, 0100H   ; Adjust for flicker-free display
+WAIT_LOOP:
+    LOOP WAIT_LOOP
     POP CX
     RET
