@@ -1,50 +1,104 @@
 ; =============================================================
-; DIAGNOSTIC TEST: FLASHLIGHT MODE
-; Description: Turns ALL segments ON. Displays "88".
-;              Used to verify wiring is correct.
+; Project: Scrolling "12345" (Corrected for Active-High CAT)
 ;
-; WIRING CHECKLIST:
-; 1. Pmod VCC -> Trainer 5V
-; 2. Pmod GND -> Trainer GND
-; 3. Pmod AA-AG -> Port A (PA0-PA6)
-; 4. Pmod CAT   -> Port B (PB0) << CRITICAL
+; Wiring Check:
+; 1. PmodSSD AA..AG -> PA0..PA6 (Must wire BOTH J1 and J2 rows!)
+; 2. PmodSSD CAT    -> PB0
+; 3. PmodSSD VCC    -> +5V
+; 4. PmodSSD GND    -> GND
 ; =============================================================
 
 ORG 2000H
     JMP START
 
+; --- DATA TABLE ---
+; Codes: 0=3FH, 1=06H, 2=5BH, 3=4FH, 4=66H, 5=6DH, Blank=00H
+CODES:  
+    DB 00H      ; [0] Space
+    DB 06H      ; [1] Number 1
+    DB 5BH      ; [2] Number 2
+    DB 4FH      ; [3] Number 3
+    DB 66H      ; [4] Number 4
+    DB 6DH      ; [5] Number 5
+    DB 00H      ; [6] Space
+
+; --- MAIN PROGRAM ---
 START:
-    ; 1. CONFIGURE PORTS
-    MOV DX, 0FFE6H  ; Control Register Address
-    MOV AL, 80H     ; Set All Ports (A, B, C) to OUTPUT
+    ; Initialize 8255 (Port A, B, C as Output)
+    MOV DX, 0FFE6H
+    MOV AL, 80H
     OUT DX, AL
 
-    ; 2. TURN ON SEGMENTS (PORT A)
-    ; We send FFH (11111111) to turn every single segment ON.
-    MOV DX, 0FFE0H  ; Port A Address
-    MOV AL, 0FFH    ; All 1s = All Lights ON
-    OUT DX, AL
+MAIN_LOOP:
+    MOV SI, CODES   ; Start of data
+    MOV CX, 6       ; 6 steps in the sequence
 
-LOOP_TOGGLE:
-    ; 3. ACTIVATE LEFT DIGIT
-    MOV DX, 0FFE2H  ; Port B Address (Connected to CAT)
-    MOV AL, 00H     ; CAT = LOW
-    OUT DX, AL      
+SCROLL_SEQ:
+    PUSH CX
+
+    ; Fetch digits
+    MOV AL, BYTE [SI]    ; Left Digit Data
+    MOV BL, BYTE [SI+1]  ; Right Digit Data
     
-    CALL DELAY      ; Wait so eyes can see it
+    ; Multiplex Loop (Hold this frame for a moment)
+    MOV CX, 00FFH   ; Scroll Speed (Increase to slow down)
 
-    ; 4. ACTIVATE RIGHT DIGIT
-    MOV DX, 0FFE2H  ; Port B Address
-    MOV AL, 01H     ; CAT = HIGH
-    OUT DX, AL      
+DISPLAY_FRAME:
+    CALL MULTIPLEX
+    LOOP DISPLAY_FRAME
 
-    CALL DELAY      ; Wait so eyes can see it
+    POP CX
+    INC SI          ; Next number
+    LOOP SCROLL_SEQ
 
-    JMP LOOP_TOGGLE ; Repeat forever
+    JMP MAIN_LOOP
 
-; --- DELAY ---
-DELAY:
-    MOV CX, 0FFFFH  ; Long delay to make sure it's visible
+; --- MULTIPLEXER (Active High Logic) ---
+MULTIPLEX:
+    PUSH AX
+    PUSH DX
+
+    ; 1. SHOW LEFT DIGIT
+    ; Set CAT (PB0) to 1 to activate (Based on your VCC test)
+    MOV DX, 0FFE2H  ; Port B
+    MOV AH, 01H     ; High Signal
+    OUT DX, AL      ; Wait... using AL for data. 
+    ; Let's be precise:
+    MOV AL, 01H     ; PB0 = 1 (ON)
+    OUT DX, AL
+
+    MOV DX, 0FFE0H  ; Port A
+    POP AX          ; Recover Data
+    PUSH AX         ; Save for next step
+    OUT DX, AL      ; Send Segment Data (Left)
+    
+    CALL DELAY_SMALL
+
+    ; 2. SHOW RIGHT DIGIT
+    ; (For PmodSSD, usually One Pin toggles Left/Right)
+    ; If PB0=1 is Left, PB0=0 might be Right? 
+    ; Or we need a second pin? 
+    ; Standard PmodSSD uses ONE pin (CAT) to swap.
+    ; Let's try toggling PB0 to 0.
+    
+    MOV DX, 0FFE2H  ; Port B
+    MOV AL, 00H     ; PB0 = 0
+    OUT DX, AL
+    
+    MOV DX, 0FFE0H  ; Port A
+    MOV AL, BL      ; Get Right Digit Data
+    OUT DX, AL      ; Send Segment Data (Right)
+    
+    CALL DELAY_SMALL
+
+    POP DX
+    POP AX
+    RET
+
+DELAY_SMALL:
+    PUSH CX
+    MOV CX, 0100H
 WAIT:
     LOOP WAIT
+    POP CX
     RET
