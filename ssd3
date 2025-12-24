@@ -1,53 +1,62 @@
 ; =================================================================
 ; Project: Scrolling Name "MOHAMMED"
 ;
-; HARDWARE MAPPING (Standard):
-;   Port A (PA0-PA6): Segments A-G
-;   Port B (PB0):     CAT (0=Right, 1=Left)
+; HARDWARE CONNECTION:
+;   PA0 = Segment A
+;   PA1 = Segment B
+;   PA2 = Segment C
+;   PA3 = Segment D
+;   PA4 = Segment E
+;   PA5 = Segment F
+;   PA6 = Segment G
+;   PB0 = CAT (Digit Select)
 ;
-; LOGIC:
-;   - Displays "MOHAMMED" scrolling across both digits.
-;   - Uses nearest shapes: 'M' looks like 'n', 'D' looks like 'd'.
+; SHAPES:
+;   M -> 'n' (Segments C,E,G)
+;   O -> '0' (Segments A,B,C,D,E,F)
+;   D -> 'd' (Segments B,C,D,E,G)
 ; =================================================================
 
 ORG 2000H
     JMP START
 
-; --- CHARACTER CODES ---
-; Standard Encoding (A=Bit0 ... G=Bit6)
+; --- CHARACTER TABLE ---
+; Hex codes calculated for Port A (A=Bit0 ... G=Bit6)
 ;
-; M (n): C,E,G       -> 0101 0100 = 54H
-; O (0): A,B,C,D,E,F -> 0011 1111 = 3FH
-; H    : B,C,E,F,G   -> 0111 0110 = 76H
-; A    : A,B,C,E,F,G -> 0111 0111 = 77H
-; E    : A,D,E,F,G   -> 0111 1001 = 79H
-; D (d): B,C,D,E,G   -> 0101 1110 = 5EH
-; Space: 00H
+; 'M' (n) -> C,E,G       = 0101 0100 = 54H
+; 'O' (0) -> A,B,C,D,E,F = 0011 1111 = 3FH
+; 'H'     -> B,C,E,F,G   = 0111 0110 = 76H
+; 'A'     -> A,B,C,E,F,G = 0111 0111 = 77H
+; 'M' (n) -> 54H
+; 'M' (n) -> 54H
+; 'E'     -> A,D,E,F,G   = 0111 1001 = 79H
+; 'D' (d) -> B,C,D,E,G   = 0101 1110 = 5EH
+; Space   -> 00H
 
 CODES:
-    DB 54H      ; [0] 'M' (n)
-    DB 3FH      ; [1] 'O' (0)
-    DB 76H      ; [2] 'H'
-    DB 77H      ; [3] 'A'
-    DB 54H      ; [4] 'M' (n)
-    DB 54H      ; [5] 'M' (n)
-    DB 79H      ; [6] 'E'
-    DB 5EH      ; [7] 'D' (d)
+    DB 54H      ; [0] M
+    DB 3FH      ; [1] O
+    DB 76H      ; [2] H
+    DB 77H      ; [3] A
+    DB 54H      ; [4] M
+    DB 54H      ; [5] M
+    DB 79H      ; [6] E
+    DB 5EH      ; [7] D
     
-    ; Extra spaces for smooth scrolling off-screen
+    ; Add spaces so the name scrolls off smoothly
     DB 00H      ; [8] Space
     DB 00H      ; [9] Space
     DB 00H      ; [10] Space
 
 START:
-    ; 1. CONFIGURE 8255 (Mode 0, All Output)
+    ; 1. CONFIGURE 8255 
     MOV DX, 0FFE6H   
-    MOV AL, 80H      
+    MOV AL, 80H      ; Mode 0, All Output
     OUT DX, AL
 
 MAIN_LOOP:
     MOV SI, CODES    ; Point to start of Name
-    MOV CX, 10       ; Scroll 10 steps (Length of name + spaces)
+    MOV CX, 10       ; 10 Scroll Steps (8 letters + 2 spaces)
 
 SCROLL_SEQUENCE:
     PUSH CX          
@@ -57,7 +66,7 @@ SCROLL_SEQUENCE:
     MOV BL, [SI+1]   ; Right Character
 
     ; --- SCROLL SPEED ---
-    ; Adjust 01FFH to make it faster/slower
+    ; Adjust 01FFH if too fast/slow
     MOV CX, 01FFH   
 
 MULTIPLEX_LOOP:
@@ -76,39 +85,39 @@ DISPLAY_PAIR:
     PUSH DX
 
     ; ======================================
-    ; 1. DISPLAY RIGHT DIGIT (Force CAT=0)
+    ; 1. DISPLAY RIGHT DIGIT (CAT PB0 = 0)
     ; ======================================
 
-    ; A. Select Right Digit (Port B = 0)
-    MOV DX, 0FFE2H   ; Port B Address
+    ; A. Select Right Digit
+    MOV DX, 0FFE2H   ; Port B
     MOV AL, 00H      ; PB0 = 0
     OUT DX, AL
 
-    ; B. Send Character Data (Port A)
-    MOV DX, 0FFE0H   ; Port A Address
+    ; B. Send Character (Port A)
+    MOV DX, 0FFE0H   ; Port A
     MOV AL, BL       ; Load Right Char
     OUT DX, AL       
     
     CALL DELAY_MUX
 
     ; ======================================
-    ; 2. DISPLAY LEFT DIGIT (Force CAT=1)
+    ; 2. DISPLAY LEFT DIGIT (CAT PB0 = 1)
     ; ======================================
 
-    ; A. Select Left Digit (Port B = 1)
-    MOV DX, 0FFE2H   ; Port B Address
+    ; A. Select Left Digit
+    MOV DX, 0FFE2H   ; Port B
     MOV AL, 01H      ; PB0 = 1
     OUT DX, AL
 
-    ; B. Send Character Data (Port A)
-    MOV DX, 0FFE0H   ; Port A Address
+    ; B. Send Character (Port A)
+    MOV DX, 0FFE0H   ; Port A
     POP AX           ; Restore Left Char
     PUSH AX          
     OUT DX, AL       
 
     CALL DELAY_MUX
 
-    ; Turn off to prevent ghosting
+    ; Ghosting Fix (Turn off display)
     MOV DX, 0FFE0H
     MOV AL, 00H
     OUT DX, AL
@@ -119,7 +128,7 @@ DISPLAY_PAIR:
 
 DELAY_MUX:
     PUSH CX
-    MOV CX, 0100H    ; Short delay for stability
+    MOV CX, 0100H    
 WAIT:
     LOOP WAIT
     POP CX
