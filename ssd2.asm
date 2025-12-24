@@ -1,55 +1,45 @@
 ; =================================================================
-; Project: Student ID Scroll (FIXED STANDARD WIRING)
+; Project: Student ID Scroll (222438835)
 ;
-; CORRECT WIRING:
-;   Port A (PA0-PA6): Segments A, B, C, D, E, F, G
-;   Port B (PB0):     CAT (Digit Select) -> 0=Right, 1=Left
+; CORRECT HARDWARE MAPPING:
+;   PA0=D, PA2=F, PA3=E, PA4=B, PA5=A, PA6=G, PA7=C
+;   PB0 = CAT (Digit Select)
 ;
-; FIXES:
-;   - Removed 'CAT' from Port A (it was interfering with segments).
-;   - Moved 'CAT' control entirely to Port B (PB0).
-;   - Used Standard Hex Codes for the segments.
 ; =================================================================
 
 ORG 2000H
     JMP START
 
-; --- DATA TABLE (Standard Encoding) ---
-; A=Bit0, B=Bit1, C=Bit2, D=Bit3, E=Bit4, F=Bit5, G=Bit6
-;
-; '2' -> 5BH
-; '4' -> 66H
-; '3' -> 4FH
-; '8' -> 7FH
-; '5' -> 6DH
-; Space -> 00H
-
+; --- DATA TABLE (Recalculated for Scrambled Port A) ---
 CODES:
-    DB 5BH      ; [0] '2'
-    DB 5BH      ; [1] '2'
-    DB 5BH      ; [2] '2'
-    DB 66H      ; [3] '4'
-    DB 4FH      ; [4] '3'
-    DB 7FH      ; [5] '8'
-    DB 7FH      ; [6] '8'
-    DB 4FH      ; [7] '3'
-    DB 6DH      ; [8] '5'
+    DB 79H      ; [0] '2'
+    DB 79H      ; [1] '2'
+    DB 79H      ; [2] '2'
+    DB 0D4H     ; [3] '4'
+    DB 0F1H     ; [4] '3'
+    DB 0FDH     ; [5] '8'
+    DB 0FDH     ; [6] '8'
+    DB 0F1H     ; [7] '3'
+    DB 0E5H     ; [8] '5'
+    
+    ; Extra spaces for smooth scrolling
     DB 00H      ; [9] Space
+    DB 00H      ; [10] Space
 
 START:
-    ; 1. CONFIGURE 8255 
+    ; 1. CONFIGURE 8255 (All Output)
     MOV DX, 0FFE6H   
-    MOV AL, 80H      ; Mode 0, All Output
+    MOV AL, 80H      
     OUT DX, AL
 
 MAIN_LOOP:
     MOV SI, CODES    ; Point to start of ID
-    MOV CX, 9        ; 9 digits to scroll
+    MOV CX, 10       ; 10 steps to scroll everything
 
 SCROLL_SEQUENCE:
     PUSH CX          
 
-    ; Load the pair of digits
+    ; Load pair of digits
     MOV AL, [SI]     ; Left Digit Data
     MOV BL, [SI+1]   ; Right Digit Data
 
@@ -75,7 +65,7 @@ DISPLAY_PAIR:
     ; 1. DISPLAY RIGHT DIGIT (CAT PB0 = 0)
     ; ======================================
 
-    ; A. Select Right Digit (Port B)
+    ; A. Select Right Digit
     MOV DX, 0FFE2H   ; Port B Address
     MOV AL, 00H      ; PB0 = 0 (Right)
     OUT DX, AL
@@ -91,15 +81,15 @@ DISPLAY_PAIR:
     ; 2. DISPLAY LEFT DIGIT (CAT PB0 = 1)
     ; ======================================
 
-    ; A. Select Left Digit (Port B)
+    ; A. Select Left Digit
     MOV DX, 0FFE2H   ; Port B Address
     MOV AL, 01H      ; PB0 = 1 (Left)
     OUT DX, AL
 
     ; B. Send Segment Data (Port A)
     MOV DX, 0FFE0H   ; Port A Address
-    POP AX           ; Restore Left Data (from Stack)
-    PUSH AX          ; Push back
+    POP AX           ; Restore Left Data
+    PUSH AX          
     OUT DX, AL       
 
     CALL DELAY_MUX
