@@ -1,111 +1,139 @@
 ; =================================================================
-; Project: Student ID Scroll (8-WIRE CONFIGURATION)
+; Project: Student ID Scroll (CUSTOM WIRING)
 ;
 ; HARDWARE MAPPING:
-;   Port A (PA0-PA6): Segments A, B, C, D, E, F, G
-;   Port B (PB0):     CAT (Digit Select)
+;   Port A: B(7), F(6), E(5), CAT(4), D(3), C(2), X(1), A(0)
+;   Port B: G(0)
 ;
-; LOGIC:
-;   - Port A handles the ENTIRE digit shape (including the middle bar).
-;   - Port B toggles the Digit Select (0 = Right, 1 = Left).
+;   Note: CAT is on PA4. We must toggle PA4 to switch digits.
+;         Segment G is on PB0. We must turn PB0 ON for digits.
 ; =================================================================
 
 ORG 2000H
     JMP START
 
-; --- DATA TABLE ---
-; Standard Encoding (A=0, B=1, ... G=6)
-;
-; '2' (A,B,D,E,G) -> Bits 0,1,3,4,6 = 0101 1011 = 5BH
-; '3' (A,B,C,D,G) -> Bits 0,1,2,3,6 = 0100 1111 = 4FH
-; '4' (B,C,F,G)   -> Bits 1,2,5,6   = 0110 0110 = 66H
-; '8' (All)       -> Bits 0-6       = 0111 1111 = 7FH
-; '5' (A,C,D,F,G) -> Bits 0,2,3,5,6 = 0110 1101 = 6DH
-; Space           -> 00H
+; --- SCRAMBLED DATA TABLE ---
+; Calculated for your specific wiring:
+; '2' (A,B,D,E,G) -> Port A: 0A9H, Port B: 01H
+; '4' (B,C,F,G)   -> Port A: 0C4H, Port B: 01H
+; '3' (A,B,C,D,G) -> Port A: 8DH,  Port B: 01H
+; '8' (All)       -> Port A: 0EDH, Port B: 01H
+; '5' (A,C,D,F,G) -> Port A: 4DH,  Port B: 01H
+; Space           -> Port A: 00H,  Port B: 00H
 
 CODES:
-    DB 5BH      ; [0] '2'
-    DB 5BH      ; [1] '2'
-    DB 5BH      ; [2] '2'
-    DB 4FH      ; [3] '3'
-    DB 66H      ; [4] '4'
-    DB 7FH      ; [5] '8'
-    DB 7FH      ; [6] '8'
-    DB 4FH      ; [7] '3'
-    DB 6DH      ; [8] '5'
+    DB 0A9H     ; [0] '2'
+    DB 0A9H     ; [1] '2'
+    DB 0A9H     ; [2] '2'
+    DB 0C4H     ; [3] '4'
+    DB 8DH      ; [4] '3'
+    DB 0EDH     ; [5] '8'
+    DB 0EDH     ; [6] '8'
+    DB 8DH      ; [7] '3'
+    DB 4DH      ; [8] '5'
     DB 00H      ; [9] Space
 
 START:
     ; 1. CONFIGURE 8255 
+    ; Port A = Output (Segments + CAT)
+    ; Port B = Output (Segment G)
     MOV DX, 0FFE6H   
     MOV AL, 80H      ; Mode 0, All Output
     OUT DX, AL
 
 MAIN_LOOP:
     MOV SI, CODES    ; Point to start of ID
-    MOV CX, 9        ; 9 steps
+    MOV CX, 9        ; 9 digits to scroll
 
 SCROLL_SEQUENCE:
-    PUSH CX          
+    PUSH CX          ; Save outer loop counter
 
-    ; Load pair
-    MOV AL, [SI]     ; Left Digit
-    MOV BL, [SI+1]   ; Right Digit
+    ; Load the pair of digits
+    MOV AL, [SI]     ; Load Left Digit Data
+    MOV BL, [SI+1]   ; Load Right Digit Data
 
-    ; --- SPEED ---
+    ; --- SCROLL SPEED ---
     MOV CX, 01FFH   
 
 MULTIPLEX_LOOP:
     CALL DISPLAY_PAIR
     LOOP MULTIPLEX_LOOP
 
-    POP CX           
-    INC SI           
+    POP CX           ; Restore outer loop counter
+    INC SI           ; Move to next digit index
     LOOP SCROLL_SEQUENCE
     
     JMP MAIN_LOOP    
 
 ; --- MULTIPLEXING ROUTINE ---
 DISPLAY_PAIR:
+    ; AL = Left Data (Port A Base)
+    ; BL = Right Data (Port A Base)
     PUSH AX
     PUSH DX
 
-    ; ======================================
-    ; 1. DISPLAY RIGHT DIGIT (CAT PB0 = 0)
-    ; ======================================
+    ; --------------------------------------
+    ; 1. DISPLAY RIGHT DIGIT
+    ;    (Assume CAT=0 selects Right. If inverted, swap logic)
+    ; --------------------------------------
+    
+    ; A. Handle Segment G (Port B)
+    ; Check if BL is 0 (Space). If so, G=0. Else G=1.
+    MOV DX, 0FFE2H   ; Port B
+    CMP BL, 00H
+    JZ  NO_G_RIGHT
+    MOV AH, 01H      ; G ON
+    JMP OUT_G_RIGHT
+NO_G_RIGHT:
+    MOV AH, 00H      ; G OFF
+OUT_G_RIGHT:
+    MOV AL, AH
+    OUT DX, AL       ; Send to Port B
 
-    ; A. Port B (CAT Low)
-    MOV DX, 0FFE2H   ; Port B Address
-    MOV AL, 00H      ; PB0 = 0 (Right)
-    OUT DX, AL
-
-    ; B. Port A (Segments)
-    MOV DX, 0FFE0H   ; Port A Address
-    MOV AL, BL       ; Load Right Digit Data
+    ; B. Handle Port A (Segments + CAT)
+    ; We want CAT (PA4) = 0 for Right Digit
+    MOV DX, 0FFE0H   ; Port A
+    MOV AL, BL       ; Get segment data
+    AND AL, 0EFH     ; Force Bit 4 (CAT) to 0
     OUT DX, AL       
     
     CALL DELAY_MUX
 
-    ; ======================================
-    ; 2. DISPLAY LEFT DIGIT (CAT PB0 = 1)
-    ; ======================================
+    ; --------------------------------------
+    ; 2. DISPLAY LEFT DIGIT
+    ;    (Assume CAT=1 selects Left)
+    ; --------------------------------------
 
-    ; A. Port B (CAT High)
-    MOV DX, 0FFE2H   ; Port B Address
-    MOV AL, 01H      ; PB0 = 1 (Left)
-    OUT DX, AL
+    ; A. Handle Segment G (Port B)
+    POP DX           ; Fix stack momentarily
+    POP AX           ; Retrieve original AL (Left Data)
+    PUSH AX
+    PUSH DX
+    
+    MOV DX, 0FFE2H   ; Port B
+    CMP AL, 00H
+    JZ  NO_G_LEFT
+    MOV AH, 01H      ; G ON
+    JMP OUT_G_LEFT
+NO_G_LEFT:
+    MOV AH, 00H      ; G OFF
+OUT_G_LEFT:
+    PUSH AX          ; Save AL (Left Data) again
+    MOV AL, AH
+    OUT DX, AL       ; Send to Port B
+    POP AX           ; Restore AL
 
-    ; B. Port A (Segments)
-    MOV DX, 0FFE0H   ; Port A Address
-    POP AX           ; Restore Left Digit Data (Original AL)
-    PUSH AX          ; Push back
+    ; B. Handle Port A (Segments + CAT)
+    ; We want CAT (PA4) = 1 for Left Digit
+    MOV DX, 0FFE0H   ; Port A
+    OR  AL, 10H      ; Force Bit 4 (CAT) to 1
     OUT DX, AL       
-
+    
     CALL DELAY_MUX
 
-    ; Turn off to prevent ghosting
+    ; Optional: Turn off bits to prevent ghosting
     MOV DX, 0FFE0H
-    MOV AL, 00H
+    MOV AL, 00H      ; All segments OFF (and CAT=0)
     OUT DX, AL
 
     POP DX
