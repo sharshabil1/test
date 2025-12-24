@@ -1,93 +1,108 @@
 ; =================================================================
-; Project: Student ID Scroll with BROKEN PA6 FIX
-; Hardware Fix: 
-;   - MOVE the wire for Segment G from PA6 -> PA7
-;   - Keep all other segments (A-F) on PA0-PA5
-;   - Keep CAT on PB0
+; Project: Student ID Scroll (CORRECTED INTERFACE)
+; Fixed based on 'ssd.asm' working logic:
+;   1. Reverted Segment Codes to STANDARD (A-G on PA0-PA6).
+;   2. Fixed Multiplexing: Uses PB0 for Right, PB1 for Left.
+;      (00H was turning the display OFF).
 ; =================================================================
 
 ORG 2000H
     JMP START
 
-; --- NEW DATA TABLE (Remapped for PA7) ---
-; Standard: g f e d c b a (Bit 6 is G)
-; Fixed:    G f e d c b a (Bit 7 is G, Bit 6 is unused/0)
-;
-; 2: was 5BH (0101 1011) -> Remove bit 6 (0001 1011) -> Add bit 7 (1001 1011) = 9BH
-; 4: was 66H (0110 0110) -> Remove bit 6 (0010 0110) -> Add bit 7 (1010 0110) = A6H
-; 3: was 4FH (0100 1111) -> Remove bit 6 (0000 1111) -> Add bit 7 (1000 1111) = 8FH
-; 8: was 7FH (0111 1111) -> Remove bit 6 (0011 1111) -> Add bit 7 (1011 1111) = BFH
-; 5: was 6DH (0110 1101) -> Remove bit 6 (0010 1101) -> Add bit 7 (1010 1101) = ADH
-; Space: 00H
+; --- STANDARD DATA TABLE (PA0-PA6) ---
+; Reverted to original values. 
+; Format: g f e d c b a
+; '2' = 5BH (0101 1011)
+; '4' = 66H (0110 0110)
+; '3' = 4FH (0100 1111)
+; '8' = 7FH (0111 1111)
+; '5' = 6DH (0110 1101)
+; Space = 00H
 
 CODES:
-    DB 9BH      ; [0] '2'
-    DB 9BH      ; [1] '2'
-    DB 9BH      ; [2] '2'
-    DB A6H      ; [3] '4'
-    DB 8FH      ; [4] '3'
-    DB BFH      ; [5] '8'
-    DB BFH      ; [6] '8'
-    DB 8FH      ; [7] '3'
-    DB ADH      ; [8] '5'
+    DB 5BH      ; [0] '2'
+    DB 5BH      ; [1] '2'
+    DB 5BH      ; [2] '2'
+    DB 66H      ; [3] '4'
+    DB 4FH      ; [4] '3'
+    DB 7FH      ; [5] '8'
+    DB 7FH      ; [6] '8'
+    DB 4FH      ; [7] '3'
+    DB 6DH      ; [8] '5'
     DB 00H      ; [9] Space
 
 START:
-    ; Initialize 8255 (All Outputs)
-    MOV DX, 0FFE6H
-    MOV AL, 80H
+    ; 1. CONFIGURE 8255 (Match ssd.asm)
+    ; Port A = Output (Segments)
+    ; Port B = Output (Digit Select)
+    MOV DX, 0FFE6H   ; Control Register
+    MOV AL, 80H      ; Mode 0, All Output
     OUT DX, AL
 
 MAIN_LOOP:
-    MOV SI, CODES   ; Point to ID numbers
-    MOV CX, 9       ; 9 digits in ID
+    MOV SI, CODES    ; Point to start of ID
+    MOV CX, 9        ; 9 digits to scroll
 
 SCROLL_SEQUENCE:
-    PUSH CX
+    PUSH CX          ; Save outer loop counter
 
-    ; Load pair
-    MOV AL, BYTE [SI]
-    MOV BL, BYTE [SI+1]
+    ; Load the pair of digits to display
+    MOV AL, [SI]     ; Load Left Data (current)
+    MOV BL, [SI+1]   ; Load Right Data (next)
 
-    ; --- SCROLL SPEED ---
+    ; --- SCROLL SPEED DURATION ---
+    ; Higher value = Slower scroll
     MOV CX, 01FFH   
 
 MULTIPLEX_LOOP:
     CALL DISPLAY_PAIR
     LOOP MULTIPLEX_LOOP
 
-    POP CX
-    INC SI
+    POP CX           ; Restore outer loop counter
+    INC SI           ; Move to next digit
     LOOP SCROLL_SEQUENCE
-    JMP MAIN_LOOP
+    
+    JMP MAIN_LOOP    ; Restart scroll from beginning
 
 ; --- MULTIPLEXING ROUTINE ---
 DISPLAY_PAIR:
+    ; Input: AL has Left Data, BL has Right Data
     PUSH AX
     PUSH DX
 
-    ; 1. DISPLAY RIGHT (PB0 = 1)
-    MOV DX, 0FFE2H   ; Port B
-    MOV AL, 01H      ; Signal High
+    ; --------------------------------------
+    ; 1. DISPLAY RIGHT DIGIT (PB0 Active)
+    ; --------------------------------------
+    MOV DX, 0FFE2H   ; Port B (Control)
+    MOV AL, 01H      ; PB0 = 1 (Enable Right)
     OUT DX, AL
 
-    MOV DX, 0FFE0H   ; Port A
-    MOV AL, BL       ; Right Digit Data
+    MOV DX, 0FFE0H   ; Port A (Segments)
+    MOV AL, BL       ; Send Right Data
     OUT DX, AL       
     
     CALL DELAY_MUX
 
-    ; 2. DISPLAY LEFT (PB0 = 0)
-    MOV DX, 0FFE2H   ; Port B
-    MOV AL, 00H      ; Signal Low
+    ; --------------------------------------
+    ; 2. DISPLAY LEFT DIGIT (PB1 Active)
+    ; --------------------------------------
+    ; In ssd.asm, 01H turned it ON. 00H likely turns it OFF.
+    ; We use PB1 (02H) for the other digit.
+    MOV DX, 0FFE2H   ; Port B (Control)
+    MOV AL, 02H      ; PB1 = 1 (Enable Left)
     OUT DX, AL
 
-    MOV DX, 0FFE0H   ; Port A
-    POP AX           ; Restore AL (Left Data)
-    PUSH AX          
-    OUT DX, AL       ; Left Digit Data
+    MOV DX, 0FFE0H   ; Port A (Segments)
+    POP AX           ; Restore AL (Left Data) from Stack
+    PUSH AX          ; Save it back for safety
+    OUT DX, AL       ; Send Left Data
     
     CALL DELAY_MUX
+
+    ; Turn off both to prevent ghosting (Optional but recommended)
+    MOV DX, 0FFE2H
+    MOV AL, 00H
+    OUT DX, AL
 
     POP DX
     POP AX
@@ -95,7 +110,7 @@ DISPLAY_PAIR:
 
 DELAY_MUX:
     PUSH CX
-    MOV CX, 0150H    ; Balanced delay
+    MOV CX, 0100H    ; Short delay for multiplexing
 WAIT:
     LOOP WAIT
     POP CX
