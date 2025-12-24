@@ -1,23 +1,22 @@
 ; =================================================================
-; Project: Student ID Scroll (FIXED)
-; 1. Syntax Fix: All hex numbers are valid (no 'A6H' errors).
-; 2. Logic Fix: Uses Standard Segment codes (like ssd.asm).
-; 3. Interface Fix: Uses PB0 and PB1 for multiplexing.
+; Project: Student ID Scroll (Standard Wiring)
+; 1. Segment Logic: Standard (A-G on PA0-PA6).
+; 2. Interface: Match 'ssd.asm' (Port A=Data, Port B=Control).
+; 3. Syntax: Fixed 'Undefined Symbol' errors by adding leading 0s.
 ; =================================================================
 
 ORG 2000H
     JMP START
 
-; --- DATA TABLE ---
-; We use Standard Codes (PA0-PA6). 
-; Note: These start with digits (5, 6, 4, 7), so they never cause
-; the "Undefined Symbol" error.
+; --- DATA TABLE (Standard Encoding) ---
+; These codes assume:
+; PA0=a, PA1=b, PA2=c, PA3=d, PA4=e, PA5=f, PA6=g
 ;
-; '2' = 5BH 
-; '4' = 66H 
-; '3' = 4FH 
-; '8' = 7FH 
-; '5' = 6DH 
+; '2' = 5BH  (0101 1011)
+; '4' = 66H  (0110 0110)
+; '3' = 4FH  (0100 1111)
+; '8' = 7FH  (0111 1111)
+; '5' = 6DH  (0110 1101)
 ; Space = 00H
 
 CODES:
@@ -33,10 +32,10 @@ CODES:
     DB 00H      ; [9] Space
 
 START:
-    ; 1. CONFIGURE 8255 
+    ; 1. CONFIGURE 8255
     ; Port A = Output (Segments)
     ; Port B = Output (Digit Select)
-    ; Control Word: 80H (Mode 0, All Output)
+    ; Mode 0, All Output = 80H
     MOV DX, 0FFE6H   
     MOV AL, 80H      
     OUT DX, AL
@@ -46,22 +45,22 @@ MAIN_LOOP:
     MOV CX, 9        ; 9 digits to scroll
 
 SCROLL_SEQUENCE:
-    PUSH CX          ; Save outer loop counter
+    PUSH CX          ; Save loop counter
 
     ; Load the pair of digits
     MOV AL, [SI]     ; Load Left Digit Data
     MOV BL, [SI+1]   ; Load Right Digit Data
 
     ; --- SCROLL SPEED ---
-    ; Increase this value (e.g., to 03FFH) if scroll is too fast
+    ; Adjust this value if scrolling is too fast/slow
     MOV CX, 01FFH   
 
 MULTIPLEX_LOOP:
     CALL DISPLAY_PAIR
     LOOP MULTIPLEX_LOOP
 
-    POP CX           ; Restore outer loop counter
-    INC SI           ; Move to next digit index
+    POP CX           ; Restore loop counter
+    INC SI           ; Move to next digit
     LOOP SCROLL_SEQUENCE
     
     JMP MAIN_LOOP    
@@ -74,11 +73,11 @@ DISPLAY_PAIR:
     ; --------------------------------------
     ; 1. DISPLAY RIGHT DIGIT (PB0 Active)
     ; --------------------------------------
-    MOV DX, 0FFE2H   ; Port B Address
-    MOV AL, 01H      ; PB0 = 1 (Turn ON Right Digit)
+    MOV DX, 0FFE2H   ; Port B (Control)
+    MOV AL, 01H      ; PB0 = 1 (Enable Right)
     OUT DX, AL
 
-    MOV DX, 0FFE0H   ; Port A Address
+    MOV DX, 0FFE0H   ; Port A (Segments)
     MOV AL, BL       ; Send Right Data (from BL)
     OUT DX, AL       
     
@@ -87,22 +86,21 @@ DISPLAY_PAIR:
     ; --------------------------------------
     ; 2. DISPLAY LEFT DIGIT (PB1 Active)
     ; --------------------------------------
-    MOV DX, 0FFE2H   ; Port B Address
-    MOV AL, 02H      ; PB1 = 1 (Turn ON Left Digit)
+    MOV DX, 0FFE2H   ; Port B (Control)
+    MOV AL, 02H      ; PB1 = 1 (Enable Left)
     OUT DX, AL
 
-    MOV DX, 0FFE0H   ; Port A Address
-    POP DX           ; (Stack fix) Restore registers carefully
+    MOV DX, 0FFE0H   ; Port A (Segments)
+    POP DX           ; Fix Stack alignment
     POP AX           ; Restore AL (Left Data)
-    
-    PUSH AX          ; Push back to keep stack balanced for final RET
-    PUSH DX
+    PUSH AX          ; Push back for RET
+    PUSH DX          ; Push back for RET
     
     OUT DX, AL       ; Send Left Data (from AL)
     
     CALL DELAY_MUX
 
-    ; Optional: Turn off both to prevent ghosting
+    ; Turn off both to prevent ghosting
     MOV DX, 0FFE2H
     MOV AL, 00H
     OUT DX, AL
@@ -113,7 +111,7 @@ DISPLAY_PAIR:
 
 DELAY_MUX:
     PUSH CX
-    MOV CX, 0100H    ; Short delay for stable display
+    MOV CX, 0100H    ; Short delay to reduce flickering
 WAIT:
     LOOP WAIT
     POP CX
