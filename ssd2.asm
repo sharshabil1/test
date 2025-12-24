@@ -1,31 +1,38 @@
 ; =================================================================
-; Project: Student ID Scroll (CAT ON PB0 VERSION)
+; Project: Student ID Scroll (8-WIRE CONFIGURATION)
 ;
-; NEW WIRING:
-;   PA0-PA5: Segments A-F (Unchanged)
-;   PB0:     CAT (Digit Select) -> 0=Right, 1=Left
-;   PB1-PB7: Segment G (We drive these High to light G)
+; HARDWARE MAPPING:
+;   Port A (PA0-PA6): Segments A, B, C, D, E, F, G
+;   Port B (PB0):     CAT (Digit Select)
 ;
-; LOGIC CHANGE:
-;   We now mix Data (G) and Control (CAT) on Port B.
+; LOGIC:
+;   - Port A handles the ENTIRE digit shape (including the middle bar).
+;   - Port B toggles the Digit Select (0 = Right, 1 = Left).
 ; =================================================================
 
 ORG 2000H
     JMP START
 
 ; --- DATA TABLE ---
-; Stores only Segment A-F codes (Port A).
-; G and CAT are handled dynamically in the logic below.
+; Standard Encoding (A=0, B=1, ... G=6)
+;
+; '2' (A,B,D,E,G) -> Bits 0,1,3,4,6 = 0101 1011 = 5BH
+; '3' (A,B,C,D,G) -> Bits 0,1,2,3,6 = 0100 1111 = 4FH
+; '4' (B,C,F,G)   -> Bits 1,2,5,6   = 0110 0110 = 66H
+; '8' (All)       -> Bits 0-6       = 0111 1111 = 7FH
+; '5' (A,C,D,F,G) -> Bits 0,2,3,5,6 = 0110 1101 = 6DH
+; Space           -> 00H
+
 CODES:
-    DB 1BH      ; [0] '2'
-    DB 1BH      ; [1] '2'
-    DB 1BH      ; [2] '2'
-    DB 0FH      ; [3] '3'
-    DB 26H      ; [4] '4'
-    DB 3FH      ; [5] '8'
-    DB 3FH      ; [6] '8'
-    DB 0FH      ; [7] '3'
-    DB 2DH      ; [8] '5'
+    DB 5BH      ; [0] '2'
+    DB 5BH      ; [1] '2'
+    DB 5BH      ; [2] '2'
+    DB 4FH      ; [3] '3'
+    DB 66H      ; [4] '4'
+    DB 7FH      ; [5] '8'
+    DB 7FH      ; [6] '8'
+    DB 4FH      ; [7] '3'
+    DB 6DH      ; [8] '5'
     DB 00H      ; [9] Space
 
 START:
@@ -35,15 +42,15 @@ START:
     OUT DX, AL
 
 MAIN_LOOP:
-    MOV SI, CODES    ; Start of ID
+    MOV SI, CODES    ; Point to start of ID
     MOV CX, 9        ; 9 steps
 
 SCROLL_SEQUENCE:
     PUSH CX          
 
     ; Load pair
-    MOV AL, [SI]     ; Left Digit Data
-    MOV BL, [SI+1]   ; Right Digit Data
+    MOV AL, [SI]     ; Left Digit
+    MOV BL, [SI+1]   ; Right Digit
 
     ; --- SPEED ---
     MOV CX, 01FFH   
@@ -67,27 +74,14 @@ DISPLAY_PAIR:
     ; 1. DISPLAY RIGHT DIGIT (CAT PB0 = 0)
     ; ======================================
 
-    ; A. Port A (Segments A-F)
-    MOV DX, 0FFE0H   ; Port A
-    MOV AL, BL       ; Load Right Data
-    OUT DX, AL       
+    ; A. Port B (CAT Low)
+    MOV DX, 0FFE2H   ; Port B Address
+    MOV AL, 00H      ; PB0 = 0 (Right)
+    OUT DX, AL
 
-    ; B. Port B (G + CAT Low)
-    ; Logic: If Data is not Space (00H), turn G ON (Bits 1-7 High).
-    ;        Keep Bit 0 LOW for CAT.
-    MOV DX, 0FFE2H   ; Port B
-    CMP BL, 00H      ; Is it a space?
-    JZ  NO_G_RIGHT   
-    
-    ; G is ON, CAT is LOW (Right) -> Binary 1111 1110 = FEH
-    MOV AL, 0FEH     
-    JMP OUT_RIGHT
-    
-NO_G_RIGHT:
-    ; G is OFF, CAT is LOW -> 00H
-    MOV AL, 00H      
-
-OUT_RIGHT:
+    ; B. Port A (Segments)
+    MOV DX, 0FFE0H   ; Port A Address
+    MOV AL, BL       ; Load Right Digit Data
     OUT DX, AL       
     
     CALL DELAY_MUX
@@ -96,33 +90,20 @@ OUT_RIGHT:
     ; 2. DISPLAY LEFT DIGIT (CAT PB0 = 1)
     ; ======================================
 
-    ; A. Port A (Segments A-F)
-    MOV DX, 0FFE0H   ; Port A
-    POP AX           ; Restore Left Data (Original AL)
-    PUSH AX          ; Save it back
-    OUT DX, AL       
+    ; A. Port B (CAT High)
+    MOV DX, 0FFE2H   ; Port B Address
+    MOV AL, 01H      ; PB0 = 1 (Left)
+    OUT DX, AL
 
-    ; B. Port B (G + CAT High)
-    ; Logic: If Data is not Space, turn G ON (Bits 1-7 High).
-    ;        Keep Bit 0 HIGH for CAT.
-    MOV DX, 0FFE2H   ; Port B
-    CMP AL, 00H      ; Is it a space?
-    JZ  NO_G_LEFT
-    
-    ; G is ON, CAT is HIGH (Left) -> Binary 1111 1111 = FFH
-    MOV AL, 0FFH     
-    JMP OUT_LEFT
-
-NO_G_LEFT:
-    ; G is OFF, CAT is HIGH -> Binary 0000 0001 = 01H
-    MOV AL, 01H      
-
-OUT_LEFT:
+    ; B. Port A (Segments)
+    MOV DX, 0FFE0H   ; Port A Address
+    POP AX           ; Restore Left Digit Data (Original AL)
+    PUSH AX          ; Push back
     OUT DX, AL       
 
     CALL DELAY_MUX
 
-    ; Ghosting Fix (Turn off Segments)
+    ; Turn off to prevent ghosting
     MOV DX, 0FFE0H
     MOV AL, 00H
     OUT DX, AL
