@@ -1,22 +1,23 @@
 ; =================================================================
-; Project: Student ID Scroll (CORRECTED INTERFACE)
-; Fixed based on 'ssd.asm' working logic:
-;   1. Reverted Segment Codes to STANDARD (A-G on PA0-PA6).
-;   2. Fixed Multiplexing: Uses PB0 for Right, PB1 for Left.
-;      (00H was turning the display OFF).
+; Project: Student ID Scroll (FIXED)
+; 1. Syntax Fix: All hex numbers are valid (no 'A6H' errors).
+; 2. Logic Fix: Uses Standard Segment codes (like ssd.asm).
+; 3. Interface Fix: Uses PB0 and PB1 for multiplexing.
 ; =================================================================
 
 ORG 2000H
     JMP START
 
-; --- STANDARD DATA TABLE (PA0-PA6) ---
-; Reverted to original values. 
-; Format: g f e d c b a
-; '2' = 5BH (0101 1011)
-; '4' = 66H (0110 0110)
-; '3' = 4FH (0100 1111)
-; '8' = 7FH (0111 1111)
-; '5' = 6DH (0110 1101)
+; --- DATA TABLE ---
+; We use Standard Codes (PA0-PA6). 
+; Note: These start with digits (5, 6, 4, 7), so they never cause
+; the "Undefined Symbol" error.
+;
+; '2' = 5BH 
+; '4' = 66H 
+; '3' = 4FH 
+; '8' = 7FH 
+; '5' = 6DH 
 ; Space = 00H
 
 CODES:
@@ -32,11 +33,12 @@ CODES:
     DB 00H      ; [9] Space
 
 START:
-    ; 1. CONFIGURE 8255 (Match ssd.asm)
+    ; 1. CONFIGURE 8255 
     ; Port A = Output (Segments)
     ; Port B = Output (Digit Select)
-    MOV DX, 0FFE6H   ; Control Register
-    MOV AL, 80H      ; Mode 0, All Output
+    ; Control Word: 80H (Mode 0, All Output)
+    MOV DX, 0FFE6H   
+    MOV AL, 80H      
     OUT DX, AL
 
 MAIN_LOOP:
@@ -46,12 +48,12 @@ MAIN_LOOP:
 SCROLL_SEQUENCE:
     PUSH CX          ; Save outer loop counter
 
-    ; Load the pair of digits to display
-    MOV AL, [SI]     ; Load Left Data (current)
-    MOV BL, [SI+1]   ; Load Right Data (next)
+    ; Load the pair of digits
+    MOV AL, [SI]     ; Load Left Digit Data
+    MOV BL, [SI+1]   ; Load Right Digit Data
 
-    ; --- SCROLL SPEED DURATION ---
-    ; Higher value = Slower scroll
+    ; --- SCROLL SPEED ---
+    ; Increase this value (e.g., to 03FFH) if scroll is too fast
     MOV CX, 01FFH   
 
 MULTIPLEX_LOOP:
@@ -59,26 +61,25 @@ MULTIPLEX_LOOP:
     LOOP MULTIPLEX_LOOP
 
     POP CX           ; Restore outer loop counter
-    INC SI           ; Move to next digit
+    INC SI           ; Move to next digit index
     LOOP SCROLL_SEQUENCE
     
-    JMP MAIN_LOOP    ; Restart scroll from beginning
+    JMP MAIN_LOOP    
 
 ; --- MULTIPLEXING ROUTINE ---
 DISPLAY_PAIR:
-    ; Input: AL has Left Data, BL has Right Data
     PUSH AX
     PUSH DX
 
     ; --------------------------------------
     ; 1. DISPLAY RIGHT DIGIT (PB0 Active)
     ; --------------------------------------
-    MOV DX, 0FFE2H   ; Port B (Control)
-    MOV AL, 01H      ; PB0 = 1 (Enable Right)
+    MOV DX, 0FFE2H   ; Port B Address
+    MOV AL, 01H      ; PB0 = 1 (Turn ON Right Digit)
     OUT DX, AL
 
-    MOV DX, 0FFE0H   ; Port A (Segments)
-    MOV AL, BL       ; Send Right Data
+    MOV DX, 0FFE0H   ; Port A Address
+    MOV AL, BL       ; Send Right Data (from BL)
     OUT DX, AL       
     
     CALL DELAY_MUX
@@ -86,20 +87,22 @@ DISPLAY_PAIR:
     ; --------------------------------------
     ; 2. DISPLAY LEFT DIGIT (PB1 Active)
     ; --------------------------------------
-    ; In ssd.asm, 01H turned it ON. 00H likely turns it OFF.
-    ; We use PB1 (02H) for the other digit.
-    MOV DX, 0FFE2H   ; Port B (Control)
-    MOV AL, 02H      ; PB1 = 1 (Enable Left)
+    MOV DX, 0FFE2H   ; Port B Address
+    MOV AL, 02H      ; PB1 = 1 (Turn ON Left Digit)
     OUT DX, AL
 
-    MOV DX, 0FFE0H   ; Port A (Segments)
-    POP AX           ; Restore AL (Left Data) from Stack
-    PUSH AX          ; Save it back for safety
-    OUT DX, AL       ; Send Left Data
+    MOV DX, 0FFE0H   ; Port A Address
+    POP DX           ; (Stack fix) Restore registers carefully
+    POP AX           ; Restore AL (Left Data)
+    
+    PUSH AX          ; Push back to keep stack balanced for final RET
+    PUSH DX
+    
+    OUT DX, AL       ; Send Left Data (from AL)
     
     CALL DELAY_MUX
 
-    ; Turn off both to prevent ghosting (Optional but recommended)
+    ; Optional: Turn off both to prevent ghosting
     MOV DX, 0FFE2H
     MOV AL, 00H
     OUT DX, AL
@@ -110,7 +113,7 @@ DISPLAY_PAIR:
 
 DELAY_MUX:
     PUSH CX
-    MOV CX, 0100H    ; Short delay for multiplexing
+    MOV CX, 0100H    ; Short delay for stable display
 WAIT:
     LOOP WAIT
     POP CX
