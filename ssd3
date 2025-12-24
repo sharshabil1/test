@@ -1,0 +1,126 @@
+; =================================================================
+; Project: Scrolling Name "MOHAMMED"
+;
+; HARDWARE MAPPING (Standard):
+;   Port A (PA0-PA6): Segments A-G
+;   Port B (PB0):     CAT (0=Right, 1=Left)
+;
+; LOGIC:
+;   - Displays "MOHAMMED" scrolling across both digits.
+;   - Uses nearest shapes: 'M' looks like 'n', 'D' looks like 'd'.
+; =================================================================
+
+ORG 2000H
+    JMP START
+
+; --- CHARACTER CODES ---
+; Standard Encoding (A=Bit0 ... G=Bit6)
+;
+; M (n): C,E,G       -> 0101 0100 = 54H
+; O (0): A,B,C,D,E,F -> 0011 1111 = 3FH
+; H    : B,C,E,F,G   -> 0111 0110 = 76H
+; A    : A,B,C,E,F,G -> 0111 0111 = 77H
+; E    : A,D,E,F,G   -> 0111 1001 = 79H
+; D (d): B,C,D,E,G   -> 0101 1110 = 5EH
+; Space: 00H
+
+CODES:
+    DB 54H      ; [0] 'M' (n)
+    DB 3FH      ; [1] 'O' (0)
+    DB 76H      ; [2] 'H'
+    DB 77H      ; [3] 'A'
+    DB 54H      ; [4] 'M' (n)
+    DB 54H      ; [5] 'M' (n)
+    DB 79H      ; [6] 'E'
+    DB 5EH      ; [7] 'D' (d)
+    
+    ; Extra spaces for smooth scrolling off-screen
+    DB 00H      ; [8] Space
+    DB 00H      ; [9] Space
+    DB 00H      ; [10] Space
+
+START:
+    ; 1. CONFIGURE 8255 (Mode 0, All Output)
+    MOV DX, 0FFE6H   
+    MOV AL, 80H      
+    OUT DX, AL
+
+MAIN_LOOP:
+    MOV SI, CODES    ; Point to start of Name
+    MOV CX, 10       ; Scroll 10 steps (Length of name + spaces)
+
+SCROLL_SEQUENCE:
+    PUSH CX          
+
+    ; Load pair of characters
+    MOV AL, [SI]     ; Left Character
+    MOV BL, [SI+1]   ; Right Character
+
+    ; --- SCROLL SPEED ---
+    ; Adjust 01FFH to make it faster/slower
+    MOV CX, 01FFH   
+
+MULTIPLEX_LOOP:
+    CALL DISPLAY_PAIR
+    LOOP MULTIPLEX_LOOP
+
+    POP CX           
+    INC SI           ; Move to next character
+    LOOP SCROLL_SEQUENCE
+    
+    JMP MAIN_LOOP    
+
+; --- MULTIPLEXING ROUTINE ---
+DISPLAY_PAIR:
+    PUSH AX
+    PUSH DX
+
+    ; ======================================
+    ; 1. DISPLAY RIGHT DIGIT (Force CAT=0)
+    ; ======================================
+
+    ; A. Select Right Digit (Port B = 0)
+    MOV DX, 0FFE2H   ; Port B Address
+    MOV AL, 00H      ; PB0 = 0
+    OUT DX, AL
+
+    ; B. Send Character Data (Port A)
+    MOV DX, 0FFE0H   ; Port A Address
+    MOV AL, BL       ; Load Right Char
+    OUT DX, AL       
+    
+    CALL DELAY_MUX
+
+    ; ======================================
+    ; 2. DISPLAY LEFT DIGIT (Force CAT=1)
+    ; ======================================
+
+    ; A. Select Left Digit (Port B = 1)
+    MOV DX, 0FFE2H   ; Port B Address
+    MOV AL, 01H      ; PB0 = 1
+    OUT DX, AL
+
+    ; B. Send Character Data (Port A)
+    MOV DX, 0FFE0H   ; Port A Address
+    POP AX           ; Restore Left Char
+    PUSH AX          
+    OUT DX, AL       
+
+    CALL DELAY_MUX
+
+    ; Turn off to prevent ghosting
+    MOV DX, 0FFE0H
+    MOV AL, 00H
+    OUT DX, AL
+
+    POP DX
+    POP AX
+    RET
+
+DELAY_MUX:
+    PUSH CX
+    MOV CX, 0100H    ; Short delay for stability
+WAIT:
+    LOOP WAIT
+    POP CX
+    RET
