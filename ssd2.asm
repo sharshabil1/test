@@ -1,16 +1,17 @@
 ; =================================================================
-; Project: Student ID Scroll (222438835)
+; Project: Student ID Scroll (SLOW SWITCHING FIX)
 ;
-; CORRECT HARDWARE MAPPING:
-;   PA0=D, PA2=F, PA3=E, PA4=B, PA5=A, PA6=G, PA7=C
-;   PB0 = CAT (Digit Select)
+; HARDWARE MAPPING (Confirmed):
+;   Segments: PA0=D, PA2=F, PA3=E, PA4=B, PA5=A, PA6=G, PA7=C
+;   CAT:      PB0 (0 = Right Digit, 1 = Left Digit)
 ;
+; FIX: Increased Delay to ensure Right Digit turns on.
 ; =================================================================
 
 ORG 2000H
     JMP START
 
-; --- DATA TABLE (Recalculated for Scrambled Port A) ---
+; --- DATA TABLE (Scrambled for your wiring) ---
 CODES:
     DB 79H      ; [0] '2'
     DB 79H      ; [1] '2'
@@ -21,37 +22,35 @@ CODES:
     DB 0FDH     ; [6] '8'
     DB 0F1H     ; [7] '3'
     DB 0E5H     ; [8] '5'
-    
-    ; Extra spaces for smooth scrolling
     DB 00H      ; [9] Space
     DB 00H      ; [10] Space
 
 START:
-    ; 1. CONFIGURE 8255 (All Output)
+    ; 1. CONFIGURE 8255 
     MOV DX, 0FFE6H   
-    MOV AL, 80H      
+    MOV AL, 80H      ; All Output
     OUT DX, AL
 
 MAIN_LOOP:
-    MOV SI, CODES    ; Point to start of ID
-    MOV CX, 10       ; 10 steps to scroll everything
+    MOV SI, CODES    ; Point to start
+    MOV CX, 10       ; 10 Steps
 
 SCROLL_SEQUENCE:
     PUSH CX          
 
     ; Load pair of digits
-    MOV AL, [SI]     ; Left Digit Data
-    MOV BL, [SI+1]   ; Right Digit Data
+    MOV AL, [SI]     ; Left Digit
+    MOV BL, [SI+1]   ; Right Digit
 
-    ; --- SPEED ---
-    MOV CX, 01FFH   
+    ; --- SCROLL SPEED ---
+    MOV CX, 00FFH    ; Slower scroll for better visibility
 
 MULTIPLEX_LOOP:
     CALL DISPLAY_PAIR
     LOOP MULTIPLEX_LOOP
 
     POP CX           
-    INC SI           ; Next digit
+    INC SI           ; Next Digit
     LOOP SCROLL_SEQUENCE
     
     JMP MAIN_LOOP    
@@ -65,34 +64,34 @@ DISPLAY_PAIR:
     ; 1. DISPLAY RIGHT DIGIT (CAT PB0 = 0)
     ; ======================================
 
-    ; A. Select Right Digit
-    MOV DX, 0FFE2H   ; Port B Address
+    ; A. Activate Right Digit (Send 0)
+    MOV DX, 0FFE2H   ; Port B
     MOV AL, 00H      ; PB0 = 0 (Right)
     OUT DX, AL
 
-    ; B. Send Segment Data (Port A)
-    MOV DX, 0FFE0H   ; Port A Address
+    ; B. Send Segments (Port A)
+    MOV DX, 0FFE0H   ; Port A
     MOV AL, BL       ; Load Right Data
     OUT DX, AL       
     
-    CALL DELAY_MUX
+    CALL DELAY_MUX   ; Wait
 
     ; ======================================
     ; 2. DISPLAY LEFT DIGIT (CAT PB0 = 1)
     ; ======================================
 
-    ; A. Select Left Digit
-    MOV DX, 0FFE2H   ; Port B Address
+    ; A. Activate Left Digit (Send 1)
+    MOV DX, 0FFE2H   ; Port B
     MOV AL, 01H      ; PB0 = 1 (Left)
     OUT DX, AL
 
-    ; B. Send Segment Data (Port A)
-    MOV DX, 0FFE0H   ; Port A Address
+    ; B. Send Segments (Port A)
+    MOV DX, 0FFE0H   ; Port A
     POP AX           ; Restore Left Data
     PUSH AX          
     OUT DX, AL       
 
-    CALL DELAY_MUX
+    CALL DELAY_MUX   ; Wait
 
     ; Turn off to prevent ghosting
     MOV DX, 0FFE0H
@@ -103,9 +102,12 @@ DISPLAY_PAIR:
     POP AX
     RET
 
+; --- INCREASED DELAY ---
 DELAY_MUX:
     PUSH CX
-    MOV CX, 0100H    
+    ; Increased delay from 0100H to 0800H
+    ; This gives the Right Digit more time to turn on.
+    MOV CX, 0800H    
 WAIT:
     LOOP WAIT
     POP CX
