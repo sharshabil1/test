@@ -1,61 +1,55 @@
 ; =================================================================
-; Project: Student ID Scroll (FORCE G SEGMENT)
+; Project: Student ID Scroll on PmodSSD using 8255 PPI
+; Objective: Scroll Student ID (222348835) on a Dual 7-Segment Display
 ;
-; PROBLEM: Segment G (AG) on Port B was not lighting up.
-; FIX: We now send 'FFH' (All Ones) to Port B instead of just '40H'.
-;      This ensures G lights up regardless of which Port B pin used.
-;
-; WIRING (As you stated):
-;   PA0=AA, PA1=AP(B), PA2=AC, PA3=AD, PA4=AE, PA5=AF
-;   PB6=AG  (But code will now drive PB0-PB7 just in case)
-;   PC4=CAT
+; Hardware Interface:
+;   - Port A (PA0-PA5): Segments A, B, C, D, E, F
+;   - Port B (Any Pin): Segment G (Driven High)
+;   - Port C (PC4):     Digit Selection (CAT)
 ; =================================================================
 
 ORG 2000H
     JMP START
 
-; --- DATA TABLE ---
+; --- SEGMENT DATA TABLE ---
 ; Format: DB (Port A Value), (Port B Value)
-;
-; We changed the second byte (Port B) from 40H to FFH.
-; This turns ON every pin on Port B to force 'G' to light up.
+; Port A controls the outer ring (A-F).
+; Port B controls the center bar (G).
 
 CODES:
-    DB 1BH, 0FFH    ; [0] '2' (Port B = All On)
+    DB 1BH, 0FFH    ; [0] '2'
     DB 1BH, 0FFH    ; [1] '2'
     DB 1BH, 0FFH    ; [2] '2'
-    
     DB 0FH, 0FFH    ; [3] '3' 
     DB 26H, 0FFH    ; [4] '4' 
-
     DB 3FH, 0FFH    ; [5] '8'
     DB 3FH, 0FFH    ; [6] '8'
     DB 0FH, 0FFH    ; [7] '3'
     DB 2DH, 0FFH    ; [8] '5'
-    
-    ; Space must remain 00H (All Off)
-    DB 00H, 00H     ; [9] Space
+    DB 00H, 00H     ; [9] Space (Blank)
 
 START:
-    ; 1. CONFIGURE 8255 
-    ; Mode 0, All Ports Output
-    MOV DX, 0FFE6H   
+    ; 1. CONFIGURE 8255 PPI
+    ; Control Word: 10000000B (80H)
+    ; Mode 0, All Ports (A, B, C) set as Output
+    MOV DX, 0FFE6H   ; Control Register Address
     MOV AL, 80H      
     OUT DX, AL
 
 MAIN_LOOP:
-    MOV CX, 9        ; Scroll Steps
-    MOV BP, 0        ; Index Counter
+    MOV CX, 9        ; Number of scrolling steps
+    MOV BP, 0        ; Digit Index Counter (0 to 8)
 
 SCROLL_SEQUENCE:
     PUSH CX          
 
-    ; Calculate Offset = BP * 2
+    ; Calculate Table Offset = Index * 2 (2 bytes per digit)
     MOV AX, BP
     ADD AX, BP       
-    MOV DI, AX       ; DI = Offset
+    MOV DI, AX       ; DI holds the calculated offset
 
-    ; --- SCROLL SPEED ---
+    ; --- SCROLL SPEED CONTROL ---
+    ; Adjust CX value to change scroll speed (Higher = Slower)
     MOV CX, 01FFH   
 
 MULTIPLEX_LOOP:
@@ -63,64 +57,67 @@ MULTIPLEX_LOOP:
     LOOP MULTIPLEX_LOOP
 
     POP CX           
-    INC BP           ; Next Index
+    INC BP           ; Move to next digit in sequence
     LOOP SCROLL_SEQUENCE
     
-    JMP MAIN_LOOP    
+    JMP MAIN_LOOP    ; Repeat sequence indefinitely
 
 ; --- MULTIPLEXING ROUTINE ---
+; Displays two digits rapidly to create persistence of vision.
 DISPLAY_PAIR:
     PUSH AX
     PUSH DX
     PUSH SI
 
-    ; 1. Load Address and Offset
+    ; Calculate memory pointer for current digit pair
     MOV SI, CODES
     ADD SI, DI       
     
     ; ======================================
-    ; 1. DISPLAY RIGHT DIGIT (PC4 = 0)
+    ; 1. DISPLAY RIGHT DIGIT
+    ;    Logic: PC4 = 0 (Low) selects Right Digit
     ; ======================================
     
-    ; A. Segments A-F (Port A)
-    MOV AL, BYTE [SI+2] ; Load Right Digit Port A
-    MOV DX, 0FFE0H      ; Port A Address
+    ; A. Output Segment Data (A-F) to Port A
+    MOV AL, BYTE [SI+2] 
+    MOV DX, 0FFE0H      
     OUT DX, AL
 
-    ; B. Segment G (Port B) - Sending FFH (All ON)
-    MOV AL, BYTE [SI+3] ; Load Right Digit Port B
-    MOV DX, 0FFE2H      ; Port B Address
+    ; B. Output Segment G to Port B
+    MOV AL, BYTE [SI+3] 
+    MOV DX, 0FFE2H      
     OUT DX, AL
 
-    ; C. Activate Digit (PC4 = Low)
-    MOV DX, 0FFE4H      ; Port C Address
-    MOV AL, 00H         ; Bit 4 = 0
-    OUT DX, AL
-    
-    CALL DELAY_MUX
-
-    ; ======================================
-    ; 2. DISPLAY LEFT DIGIT (PC4 = 1)
-    ; ======================================
-
-    ; A. Segments A-F (Port A)
-    MOV AL, BYTE [SI]   ; Load Left Digit Port A
-    MOV DX, 0FFE0H      ; Port A Address
-    OUT DX, AL
-
-    ; B. Segment G (Port B) - Sending FFH (All ON)
-    MOV AL, BYTE [SI+1] ; Load Left Digit Port B
-    MOV DX, 0FFE2H      ; Port B Address
-    OUT DX, AL
-
-    ; C. Activate Digit (PC4 = High)
-    MOV DX, 0FFE4H      ; Port C Address
-    MOV AL, 10H         ; Bit 4 = 1
+    ; C. Activate Digit (PC4 Low)
+    MOV DX, 0FFE4H      
+    MOV AL, 00H         
     OUT DX, AL
     
     CALL DELAY_MUX
 
-    ; Turn off to prevent ghosting
+    ; ======================================
+    ; 2. DISPLAY LEFT DIGIT
+    ;    Logic: PC4 = 1 (High) selects Left Digit
+    ; ======================================
+
+    ; A. Output Segment Data (A-F) to Port A
+    MOV AL, BYTE [SI]   
+    MOV DX, 0FFE0H      
+    OUT DX, AL
+
+    ; B. Output Segment G to Port B
+    MOV AL, BYTE [SI+1] 
+    MOV DX, 0FFE2H      
+    OUT DX, AL
+
+    ; C. Activate Digit (PC4 High)
+    MOV DX, 0FFE4H      
+    MOV AL, 10H         
+    OUT DX, AL
+    
+    CALL DELAY_MUX
+
+    ; Prevent Ghosting (Turn off Port A)
     MOV DX, 0FFE0H
     MOV AL, 00H
     OUT DX, AL
@@ -130,6 +127,8 @@ DISPLAY_PAIR:
     POP AX
     RET
 
+; --- DELAY SUBROUTINE ---
+; Creates a short pause for stable multiplexing
 DELAY_MUX:
     PUSH CX
     MOV CX, 0100H    
