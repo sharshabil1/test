@@ -1,15 +1,12 @@
 ; =================================================================
-; Project: Student ID Scroll (LATEST WIRING)
+; Project: Student ID Scroll (SYNTAX FIXED)
 ;
-; MAPPING:
-;   PA0=A, PA1=B(AP), PA2=C, PA3=D, PA4=E, PA5=F
-;   PB6=G
+; WIRING MAPPING:
+;   PA0=AA, PA1=AP(B), PA2=AC, PA3=AD, PA4=AE, PA5=AF
+;   PB6=AG
 ;   PC4=CAT
 ;
-; LOGIC:
-;   - Port A handles the outer circle of the digit (A-F).
-;   - Port B handles the middle bar (G).
-;   - Port C switches between Left/Right digits.
+; FIX: Replaced 'CODES[DI+2]' with '[BX+2]' to solve syntax errors.
 ; =================================================================
 
 ORG 2000H
@@ -17,21 +14,14 @@ ORG 2000H
 
 ; --- DATA TABLE ---
 ; Format: DB (Port A Value), (Port B Value)
-;
-; Calculations:
-; '2' (A,B,D,E,G) -> PA: Bits 0,1,3,4 = 1BH.  PB: Bit 6 = 40H.
-; '3' (A,B,C,D,G) -> PA: Bits 0,1,2,3 = 0FH.  PB: Bit 6 = 40H.
-; '4' (B,C,F,G)   -> PA: Bits 1,2,5   = 26H.  PB: Bit 6 = 40H.
-; '8' (All)       -> PA: Bits 0-5     = 3FH.  PB: Bit 6 = 40H.
-; '5' (A,C,D,F,G) -> PA: Bits 0,2,3,5 = 2DH.  PB: Bit 6 = 40H.
-; Space           -> PA: 00H.         PB: 00H.
+; Based on: PA0=A, PA1=B, PA2=C, PA3=D, PA4=E, PA5=F, PB6=G
 
 CODES:
     DB 1BH, 40H     ; [0] '2'
     DB 1BH, 40H     ; [1] '2'
     DB 1BH, 40H     ; [2] '2'
     
-    DB 0FH, 40H     ; [3] '3' (Swapped to correct order)
+    DB 0FH, 40H     ; [3] '3' 
     DB 26H, 40H     ; [4] '4' 
 
     DB 3FH, 40H     ; [5] '8'
@@ -42,9 +32,8 @@ CODES:
 
 START:
     ; 1. CONFIGURE 8255 
-    ; All Ports Output (Mode 0)
     MOV DX, 0FFE6H   
-    MOV AL, 80H      
+    MOV AL, 80H      ; Mode 0, All Output
     OUT DX, AL
 
 MAIN_LOOP:
@@ -54,9 +43,9 @@ MAIN_LOOP:
 SCROLL_SEQUENCE:
     PUSH CX          
 
-    ; Calculate memory offset: SI * 2
+    ; Calculate array offset: SI * 2
     MOV DI, SI
-    ADD DI, SI       
+    ADD DI, SI       ; DI now points to the current digit pair in bytes
 
     ; --- SCROLL SPEED ---
     MOV CX, 01FFH   
@@ -74,22 +63,26 @@ MULTIPLEX_LOOP:
 ; --- MULTIPLEXING ROUTINE ---
 DISPLAY_PAIR:
     PUSH AX
+    PUSH BX
     PUSH DX
     PUSH DI
 
-    ; DI points to Left Digit. DI+2 points to Right Digit.
+    ; Fix for Syntax Error: Load address of CODES into BX
+    MOV BX, OFFSET CODES
+    ADD BX, DI       ; BX now points to the current Left Digit data
 
     ; ======================================
     ; 1. DISPLAY RIGHT DIGIT (PC4 = 0)
+    ;    Right Digit is at offset +2 from current BX
     ; ======================================
     
     ; A. Segments A-F (Port A)
-    MOV AL, CODES[DI+2] ; Load Right Digit Port A
+    MOV AL, [BX+2]      ; Load Right Digit Port A Value
     MOV DX, 0FFE0H      ; Port A Address
     OUT DX, AL
 
     ; B. Segment G (Port B)
-    MOV AL, CODES[DI+3] ; Load Right Digit Port B
+    MOV AL, [BX+3]      ; Load Right Digit Port B Value
     MOV DX, 0FFE2H      ; Port B Address
     OUT DX, AL
 
@@ -102,15 +95,16 @@ DISPLAY_PAIR:
 
     ; ======================================
     ; 2. DISPLAY LEFT DIGIT (PC4 = 1)
+    ;    Left Digit is at offset +0 from current BX
     ; ======================================
 
     ; A. Segments A-F (Port A)
-    MOV AL, CODES[DI]   ; Load Left Digit Port A
+    MOV AL, [BX]        ; Load Left Digit Port A Value
     MOV DX, 0FFE0H      ; Port A Address
     OUT DX, AL
 
     ; B. Segment G (Port B)
-    MOV AL, CODES[DI+1] ; Load Left Digit Port B
+    MOV AL, [BX+1]      ; Load Left Digit Port B Value
     MOV DX, 0FFE2H      ; Port B Address
     OUT DX, AL
 
@@ -128,6 +122,7 @@ DISPLAY_PAIR:
     
     POP DI
     POP DX
+    POP BX
     POP AX
     RET
 
